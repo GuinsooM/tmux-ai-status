@@ -17,7 +17,15 @@ CACHE_LEFT="/tmp/claude-status-left-${USER}-${cwd_hash}.tmux"
 # Also write a "latest" pointer so tmux-ai-status can find caches by cwd
 echo "$cwd_raw" > "/tmp/claude-cwd-${USER}-${cwd_hash}.txt"
 
-# --- Claude Code statusline: output nothing ---
+# --- Pass through to Claude HUD (keeps usage-cache.json fresh) ---
+plugin_dir=$(ls -d "$HOME"/.claude/plugins/cache/claude-hud/claude-hud/*/ 2>/dev/null \
+  | awk -F/ '{ print $(NF-1) "\t" $0 }' \
+  | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n \
+  | tail -1 | cut -f2-)
+if [ -n "$plugin_dir" ] && [ -x "$HOME/.bun/bin/bun" ]; then
+  echo "$input" | "$HOME/.bun/bin/bun" "${plugin_dir}src/index.ts" > /dev/null 2>&1
+fi
+# Output nothing to Claude Code (display is in tmux)
 echo ""
 
 # --- Helper: generate a tmux progress bar ---
