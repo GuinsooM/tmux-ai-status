@@ -1,0 +1,138 @@
+#!/bin/bash
+# Called by Claude Code's statusline. Writes tmux-formatted info to cache file.
+# Outputs nothing to Claude Code (display is in tmux).
+
+USAGE_CACHE="$HOME/.claude/plugins/claude-hud/.usage-cache.json"
+input=$(cat)
+
+# Cache file keyed by workspace directory
+cwd_raw=$(echo "$input" | jq -r '.workspace.current_dir // empty')
+if [ -n "$cwd_raw" ]; then
+  cwd_hash=$(echo -n "$cwd_raw" | md5sum | cut -c1-8)
+else
+  cwd_hash="default"
+fi
+CACHE_FILE="/tmp/claude-status-${USER}-${cwd_hash}.tmux"
+CACHE_LEFT="/tmp/claude-status-left-${USER}-${cwd_hash}.tmux"
+# Also write a "latest" pointer so tmux-ai-status can find caches by cwd
+echo "$cwd_raw" > "/tmp/claude-cwd-${USER}-${cwd_hash}.txt"
+
+# --- Claude Code statusline: output nothing ---
+echo ""
+
+# --- Helper: generate a tmux progress bar ---
+make_bar() {
+  local pct=${1:-0} width=${2:-10} fg_color="$3" dim_color="${4:-colour245}"
+  local filled=$(( (pct * width + 50) / 100 ))
+  [ "$filled" -gt "$width" ] && filled=$width
+  local empty=$(( width - filled ))
+  local bar="" empty_bar="" i
+  for i in $(seq 1 $filled); do bar="${bar}█"; done
+  for i in $(seq 1 $empty); do empty_bar="${empty_bar}░"; done
+  echo "#[fg=${fg_color}]${bar}#[fg=${dim_color}]${empty_bar}#[default]"
+}
+
+# --- Generate tmux cache (background) ---
+{
+  cwd=$(echo "$input" | jq -r '.workspace.current_dir // empty')
+  model=$(echo "$input" | jq -r '.model.display_name // .model.id // "?"')
+  ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+
+  # Usage from HUD cache
+  u5_pct="" u7_pct="" u5_reset_at="" u7_reset_at=""
+  if [ -f "$USAGE_CACHE" ]; then
+    u5_pct=$(jq -r '.data.fiveHour // empty' "$USAGE_CACHE" 2>/dev/null)
+    u7_pct=$(jq -r '.data.sevenDay // empty' "$USAGE_CACHE" 2>/dev/null)
+    u5_reset_at=$(jq -r '.data.fiveHourResetAt // empty' "$USAGE_CACHE" 2>/dev/null)
+    u7_reset_at=$(jq -r '.data.sevenDayResetAt // empty' "$USAGE_CACHE" 2>/dev/null)
+  fi
+
+  parts=""
+
+  # --- Write dir+git info to separate cache for status-left ---
+  left_parts=""
+  if [ -n "$cwd" ]; then
+    dir_name=$(basename "$cwd")
+    left_parts="${left_parts} #[fg=colour114]${dir_name}#[default]"
+  fi
+  if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir > /dev/null 2>&1; then
+    branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null || git -C "$cwd" rev-parse --short HEAD 2>/dev/null)
+    if [ -n "$branch" ]; then
+      dirty=""
+      if ! git -C "$cwd" diff --quiet --no-optional-locks 2>/dev/null || ! git -C "$cwd" diff --cached --quiet --no-optional-locks 2>/dev/null; then
+        dirty="*"
+      fi
+      left_parts="${left_parts} #[fg=colour33]git:(#[fg=red]${branch}${dirty}#[fg=colour33])#[default]"
+    fi
+  fi
+  echo "$left_parts" > "$CACHE_LEFT"
+
+  # --- CLI label ---
+  parts="#[fg=colour203,bold]Claude#[default] #[fg=colour245]|#[default]"
+
+  # --- Context bar ---
+  if [ "$ctx_pct" -ge 80 ] 2>/dev/null; then
+    ctx_color="red"
+  elif [ "$ctx_pct" -ge 50 ] 2>/dev/null; then
+    ctx_color="yellow"
+  else
+    ctx_color="green"
+  fi
+  ctx_bar=$(make_bar "$ctx_pct" 10 "$ctx_color" "colour114")
+  parts="${parts} ${ctx_bar} #[fg=${ctx_color}]${ctx_pct}%#[default]"
+
+  # --- 5-hour usage ---
+  if [ -n "$u5_pct" ]; then
+    if [ "$u5_pct" -ge 80 ] 2>/dev/null; then
+      u5_color="red"
+    elif [ "$u5_pct" -ge 50 ] 2>/dev/null; then
+      u5_color="yellow"
+    else
+      u5_color="colour33"
+    fi
+    u5_bar=$(make_bar "$u5_pct" 10 "$u5_color" "colour117")
+    u5_str="${u5_bar} #[fg=${u5_color}]${u5_pct}%#[default]"
+    if [ -n "$u5_reset_at" ]; then
+      now=$(date +%s)
+      reset_epoch=$(date -d "$u5_reset_at" +%s 2>/dev/null)
+      if [ -n "$reset_epoch" ] && [ "$reset_epoch" -gt "$now" ] 2>/dev/null; then
+        diff_min=$(( (reset_epoch - now) / 60 ))
+        hours=$((diff_min / 60)); mins=$((diff_min % 60))
+        if [ "$hours" -gt 0 ]; then
+          u5_str="${u5_str} #[fg=${u5_color}](${hours}h ${mins}m)#[default]"
+        else
+          u5_str="${u5_str} #[fg=${u5_color}](${mins}m)#[default]"
+        fi
+      fi
+    fi
+    parts="${parts} #[fg=colour245]|#[default] ${u5_str}"
+  fi
+
+  # --- 7-day usage ---
+  if [ -n "$u7_pct" ]; then
+    if [ "$u7_pct" -ge 80 ] 2>/dev/null; then
+      u7_color="red"
+    elif [ "$u7_pct" -ge 50 ] 2>/dev/null; then
+      u7_color="yellow"
+    else
+      u7_color="magenta"
+    fi
+    u7_bar=$(make_bar "$u7_pct" 10 "$u7_color" "colour218")
+    u7_str="${u7_bar} #[fg=${u7_color}]${u7_pct}%#[default]"
+    if [ -n "$u7_reset_at" ]; then
+      now=$(date +%s)
+      reset_epoch=$(date -d "$u7_reset_at" +%s 2>/dev/null)
+      if [ -n "$reset_epoch" ] && [ "$reset_epoch" -gt "$now" ] 2>/dev/null; then
+        diff_hrs=$(( (reset_epoch - now) / 3600 ))
+        days=$((diff_hrs / 24)); hours=$((diff_hrs % 24))
+        u7_str="${u7_str} #[fg=${u7_color}](${days}d ${hours}h)#[default]"
+      fi
+    fi
+    parts="${parts} #[fg=colour245]|#[default] ${u7_str}"
+  fi
+
+  # --- Model ---
+  parts="${parts} #[fg=colour245]|#[default] #[fg=cyan][${model}]#[default]"
+
+  echo "$parts" > "$CACHE_FILE"
+} &
