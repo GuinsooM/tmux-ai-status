@@ -68,10 +68,11 @@ make_bar() {
   parts=""
 
   # --- Write dir+git info to separate cache for status-left ---
+  # Compact format: "dir branch*" — pad_to in tmux-ai-status.sh handles fixed width
   left_parts=""
   if [ -n "$cwd" ]; then
     dir_name=$(basename "$cwd")
-    left_parts="${left_parts} #[fg=colour114]${dir_name}#[default]"
+    left_parts=" #[fg=colour114]${dir_name}#[default]"
   fi
   if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir > /dev/null 2>&1; then
     branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null || git -C "$cwd" rev-parse --short HEAD 2>/dev/null)
@@ -80,7 +81,7 @@ make_bar() {
       if ! git -C "$cwd" diff --quiet --no-optional-locks 2>/dev/null || ! git -C "$cwd" diff --cached --quiet --no-optional-locks 2>/dev/null; then
         dirty="*"
       fi
-      left_parts="${left_parts} #[fg=colour33]git:(#[fg=red]${branch}${dirty}#[fg=colour33])#[default]"
+      left_parts="${left_parts} #[fg=red]${branch}${dirty}#[default]"
     fi
   fi
   echo "$left_parts" > "$CACHE_LEFT"
@@ -96,20 +97,19 @@ make_bar() {
       u5_color="colour33"
     fi
     u5_bar=$(make_bar "$u5_pct" 10 "$u5_color" "colour117")
-    u5_str="${u5_bar} #[fg=${u5_color}]${u5_pct}%#[default]"
+    u5_label=$(printf '%3d%%' "$u5_pct")
+    u5_reset="        "
     if [ -n "$u5_reset_at" ]; then
       now=$(date +%s)
       reset_epoch=$(date -d "$u5_reset_at" +%s 2>/dev/null)
       if [ -n "$reset_epoch" ] && [ "$reset_epoch" -gt "$now" ] 2>/dev/null; then
         diff_min=$(( (reset_epoch - now) / 60 ))
         hours=$((diff_min / 60)); mins=$((diff_min % 60))
-        if [ "$hours" -gt 0 ]; then
-          u5_str="${u5_str} #[fg=${u5_color}](${hours}h ${mins}m)#[default]"
-        else
-          u5_str="${u5_str} #[fg=${u5_color}](${mins}m)#[default]"
-        fi
+        u5_reset=$(printf '(%dh%02dm)' "$hours" "$mins")
+        u5_reset=$(printf '%-8s' "$u5_reset")
       fi
     fi
+    u5_str="${u5_bar} #[fg=${u5_color}]${u5_label} ${u5_reset}#[default]"
     usage_parts="${usage_parts} #[fg=colour245]|#[default] ${u5_str}"
   fi
   if [ -n "$u7_pct" ]; then
@@ -121,16 +121,19 @@ make_bar() {
       u7_color="magenta"
     fi
     u7_bar=$(make_bar "$u7_pct" 10 "$u7_color" "colour218")
-    u7_str="${u7_bar} #[fg=${u7_color}]${u7_pct}%#[default]"
+    u7_label=$(printf '%3d%%' "$u7_pct")
+    u7_reset="        "
     if [ -n "$u7_reset_at" ]; then
       now=$(date +%s)
       reset_epoch=$(date -d "$u7_reset_at" +%s 2>/dev/null)
       if [ -n "$reset_epoch" ] && [ "$reset_epoch" -gt "$now" ] 2>/dev/null; then
         diff_hrs=$(( (reset_epoch - now) / 3600 ))
         days=$((diff_hrs / 24)); hours=$((diff_hrs % 24))
-        u7_str="${u7_str} #[fg=${u7_color}](${days}d ${hours}h)#[default]"
+        u7_reset=$(printf '(%dd%02dh)' "$days" "$hours")
+        u7_reset=$(printf '%-8s' "$u7_reset")
       fi
     fi
+    u7_str="${u7_bar} #[fg=${u7_color}]${u7_label} ${u7_reset}#[default]"
     usage_parts="${usage_parts} #[fg=colour245]|#[default] ${u7_str}"
   fi
   echo "$usage_parts" > "$CACHE_USAGE"
@@ -146,10 +149,12 @@ make_bar() {
     ctx_color="green"
   fi
   ctx_bar=$(make_bar "$ctx_pct" 10 "$ctx_color" "colour114")
-  parts="${parts} ${ctx_bar} #[fg=${ctx_color}]${ctx_pct}%#[default]"
+  ctx_label=$(printf '%3d%%' "$ctx_pct")
+  parts="${parts} ${ctx_bar} #[fg=${ctx_color}]${ctx_label}#[default]"
 
   echo "$parts" > "$CACHE_FILE"
 
-  # --- Per-tab model suffix cache ---
-  echo " #[fg=colour245]|#[default] #[fg=cyan][${model}]#[default]" > "${CACHE_FILE%.tmux}-model.tmux"
+  # --- Per-tab model suffix cache (fixed width) ---
+  model_label=$(printf '%-12s' "$model")
+  echo " #[fg=colour245]|#[default] #[fg=cyan][${model_label}]#[default]" > "${CACHE_FILE%.tmux}-model.tmux"
 } &

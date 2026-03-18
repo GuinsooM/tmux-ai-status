@@ -127,7 +127,7 @@ latest=$(echo "$selection_json" | jq -c '.latest // empty' 2>/dev/null)
 latest_with_limits=$(echo "$selection_json" | jq -c '.latest_with_limits // empty' 2>/dev/null)
 
 if [ -z "$latest" ]; then
-  echo "#[fg=colour84,bold]Codex#[default] #[fg=colour245](no data)#[default]" > "$CACHE_FILE"
+  echo "#[fg=colour84,bold]Codex #[default]#[fg=colour245](no data)#[default]" > "$CACHE_FILE"
   cat "$CACHE_FILE"
   exit 0
 fi
@@ -152,7 +152,7 @@ if [ "$ctx_window" -gt 0 ] 2>/dev/null && [ "$ctx_tokens" -gt 0 ] 2>/dev/null; t
   [ "$ctx_pct" -gt 100 ] && ctx_pct=100
 fi
 
-parts="#[fg=colour84,bold]Codex#[default] #[fg=colour245]|#[default]"
+parts="#[fg=colour84,bold]Codex #[default]#[fg=colour245]|#[default]"
 
 # Context bar
 if [ "$ctx_pct" -ge 80 ] 2>/dev/null; then
@@ -163,7 +163,8 @@ else
   ctx_color="green"
 fi
 ctx_bar=$(make_bar "$ctx_pct" 10 "$ctx_color" "colour114")
-parts="${parts} ${ctx_bar} #[fg=${ctx_color}]${ctx_pct}%#[default]"
+ctx_label=$(printf '%3d%%' "$ctx_pct")
+parts="${parts} ${ctx_bar} #[fg=${ctx_color}]${ctx_label}#[default]"
 
 # 5-hour usage
 if [ -n "$u5_pct" ]; then
@@ -176,19 +177,18 @@ if [ -n "$u5_pct" ]; then
     u5_color="colour33"
   fi
   u5_bar=$(make_bar "$u5_int" 10 "$u5_color" "colour117")
-  u5_str="${u5_bar} #[fg=${u5_color}]${u5_int}%#[default]"
+  u5_label=$(printf '%3d%%' "$u5_int")
+  u5_reset="        "
   if [ -n "$u5_resets" ]; then
     now=$(date +%s)
     if [ "$u5_resets" -gt "$now" ] 2>/dev/null; then
       diff_min=$(( (u5_resets - now) / 60 ))
       hours=$((diff_min / 60)); mins=$((diff_min % 60))
-      if [ "$hours" -gt 0 ]; then
-        u5_str="${u5_str} #[fg=${u5_color}](${hours}h ${mins}m)#[default]"
-      else
-        u5_str="${u5_str} #[fg=${u5_color}](${mins}m)#[default]"
-      fi
+      u5_reset=$(printf '(%dh%02dm)' "$hours" "$mins")
+      u5_reset=$(printf '%-8s' "$u5_reset")
     fi
   fi
+  u5_str="${u5_bar} #[fg=${u5_color}]${u5_label} ${u5_reset}#[default]"
   parts="${parts} #[fg=colour245]|#[default] ${u5_str}"
 fi
 
@@ -203,22 +203,26 @@ if [ -n "$u7_pct" ]; then
     u7_color="magenta"
   fi
   u7_bar=$(make_bar "$u7_int" 10 "$u7_color" "colour218")
-  u7_str="${u7_bar} #[fg=${u7_color}]${u7_int}%#[default]"
+  u7_label=$(printf '%3d%%' "$u7_int")
+  u7_reset="        "
   if [ -n "$u7_resets" ]; then
     now=$(date +%s)
     if [ "$u7_resets" -gt "$now" ] 2>/dev/null; then
       diff_hrs=$(( (u7_resets - now) / 3600 ))
       days=$((diff_hrs / 24)); hours=$((diff_hrs % 24))
-      u7_str="${u7_str} #[fg=${u7_color}](${days}d ${hours}h)#[default]"
+      u7_reset=$(printf '(%dd%02dh)' "$days" "$hours")
+      u7_reset=$(printf '%-8s' "$u7_reset")
     fi
   fi
+  u7_str="${u7_bar} #[fg=${u7_color}]${u7_label} ${u7_reset}#[default]"
   parts="${parts} #[fg=colour245]|#[default] ${u7_str}"
 fi
 
 # Model
 codex_model=$(grep '^model ' ~/.codex/config.toml 2>/dev/null | head -1 | sed 's/.*= *"\(.*\)"/\1/')
 [ -z "$codex_model" ] && codex_model="?"
-parts="${parts} #[fg=colour245]|#[default] #[fg=cyan][${codex_model}]#[default]"
+model_label=$(printf '%-12s' "$codex_model")
+parts="${parts} #[fg=colour245]|#[default] #[fg=cyan][${model_label}]#[default]"
 
 echo "$parts" > "$CACHE_FILE"
 cat "$CACHE_FILE"
