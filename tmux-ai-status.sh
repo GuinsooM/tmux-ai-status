@@ -47,7 +47,14 @@ find_claude_cache() {
       [ -f "$f" ] && cat "$f" && return
     else
       local f="/tmp/claude-status-${USER}-${cwd_hash}.tmux"
-      [ -f "$f" ] && cat "$f" && return
+      if [ -f "$f" ]; then
+        local per_tab usage_shared model_suffix
+        per_tab=$(cat "$f")
+        usage_shared=$(cat "/tmp/claude-status-usage-${USER}.tmux" 2>/dev/null)
+        model_suffix=$(cat "${f%.tmux}-model.tmux" 2>/dev/null)
+        echo "${per_tab}${usage_shared}${model_suffix}"
+        return
+      fi
     fi
   fi
 
@@ -55,7 +62,15 @@ find_claude_cache() {
   if [ "$side" = "left" ]; then
     ls -t /tmp/claude-status-left-${USER}-*.tmux 2>/dev/null | head -1 | xargs cat 2>/dev/null
   else
-    ls -t /tmp/claude-status-${USER}-*.tmux 2>/dev/null | head -1 | xargs cat 2>/dev/null
+    local f
+    f=$(ls -t /tmp/claude-status-${USER}-*.tmux 2>/dev/null | grep -v '\-model\.tmux$\|\-usage' | head -1)
+    if [ -n "$f" ]; then
+      local per_tab usage_shared model_suffix
+      per_tab=$(cat "$f")
+      usage_shared=$(cat "/tmp/claude-status-usage-${USER}.tmux" 2>/dev/null)
+      model_suffix=$(cat "${f%.tmux}-model.tmux" 2>/dev/null)
+      echo "${per_tab}${usage_shared}${model_suffix}"
+    fi
   fi
 }
 

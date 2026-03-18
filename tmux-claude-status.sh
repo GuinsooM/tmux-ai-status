@@ -14,6 +14,7 @@ else
 fi
 CACHE_FILE="/tmp/claude-status-${USER}-${cwd_hash}.tmux"
 CACHE_LEFT="/tmp/claude-status-left-${USER}-${cwd_hash}.tmux"
+CACHE_USAGE="/tmp/claude-status-usage-${USER}.tmux"
 # Also write a "latest" pointer so tmux-ai-status can find caches by cwd
 echo "$cwd_raw" > "/tmp/claude-cwd-${USER}-${cwd_hash}.txt"
 
@@ -44,15 +45,24 @@ make_bar() {
 {
   cwd=$(echo "$input" | jq -r '.workspace.current_dir // empty')
   model=$(echo "$input" | jq -r '.model.display_name // .model.id // "?"')
+  # Shorten long model display names
+  case "$model" in
+    *Opus*4.6*1M*)   model="opus-4.6-1M" ;;
+    *Opus*4.6*)      model="opus-4.6" ;;
+    *Opus*4.5*)      model="opus-4.5" ;;
+    *Sonnet*4.6*)    model="sonnet-4.6" ;;
+    *Sonnet*4.5*)    model="sonnet-4.5" ;;
+    *Haiku*4.5*)     model="haiku-4.5" ;;
+  esac
   ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
 
-  # Usage from HUD cache
+  # Usage from HUD cache (prefer .data, fall back to .lastGoodData seamlessly)
   u5_pct="" u7_pct="" u5_reset_at="" u7_reset_at=""
   if [ -f "$USAGE_CACHE" ]; then
-    u5_pct=$(jq -r '.data.fiveHour // empty' "$USAGE_CACHE" 2>/dev/null)
-    u7_pct=$(jq -r '.data.sevenDay // empty' "$USAGE_CACHE" 2>/dev/null)
-    u5_reset_at=$(jq -r '.data.fiveHourResetAt // empty' "$USAGE_CACHE" 2>/dev/null)
-    u7_reset_at=$(jq -r '.data.sevenDayResetAt // empty' "$USAGE_CACHE" 2>/dev/null)
+    u5_pct=$(jq -r '(.data.fiveHour // .lastGoodData.fiveHour) // empty' "$USAGE_CACHE" 2>/dev/null)
+    u7_pct=$(jq -r '(.data.sevenDay // .lastGoodData.sevenDay) // empty' "$USAGE_CACHE" 2>/dev/null)
+    u5_reset_at=$(jq -r '(.data.fiveHourResetAt // .lastGoodData.fiveHourResetAt) // empty' "$USAGE_CACHE" 2>/dev/null)
+    u7_reset_at=$(jq -r '(.data.sevenDayResetAt // .lastGoodData.sevenDayResetAt) // empty' "$USAGE_CACHE" 2>/dev/null)
   fi
 
   parts=""
@@ -75,21 +85,8 @@ make_bar() {
   fi
   echo "$left_parts" > "$CACHE_LEFT"
 
-  # --- CLI label ---
-  parts="#[fg=colour203,bold]Claude#[default] #[fg=colour245]|#[default]"
-
-  # --- Context bar ---
-  if [ "$ctx_pct" -ge 80 ] 2>/dev/null; then
-    ctx_color="red"
-  elif [ "$ctx_pct" -ge 50 ] 2>/dev/null; then
-    ctx_color="yellow"
-  else
-    ctx_color="green"
-  fi
-  ctx_bar=$(make_bar "$ctx_pct" 10 "$ctx_color" "colour114")
-  parts="${parts} ${ctx_bar} #[fg=${ctx_color}]${ctx_pct}%#[default]"
-
-  # --- 5-hour usage ---
+  # --- Render shared usage cache (all tabs see the same latest data) ---
+  usage_parts=""
   if [ -n "$u5_pct" ]; then
     if [ "$u5_pct" -ge 80 ] 2>/dev/null; then
       u5_color="red"
@@ -113,10 +110,8 @@ make_bar() {
         fi
       fi
     fi
-    parts="${parts} #[fg=colour245]|#[default] ${u5_str}"
+    usage_parts="${usage_parts} #[fg=colour245]|#[default] ${u5_str}"
   fi
-
-  # --- 7-day usage ---
   if [ -n "$u7_pct" ]; then
     if [ "$u7_pct" -ge 80 ] 2>/dev/null; then
       u7_color="red"
@@ -136,11 +131,25 @@ make_bar() {
         u7_str="${u7_str} #[fg=${u7_color}](${days}d ${hours}h)#[default]"
       fi
     fi
-    parts="${parts} #[fg=colour245]|#[default] ${u7_str}"
+    usage_parts="${usage_parts} #[fg=colour245]|#[default] ${u7_str}"
   fi
+  echo "$usage_parts" > "$CACHE_USAGE"
 
-  # --- Model ---
-  parts="${parts} #[fg=colour245]|#[default] #[fg=cyan][${model}]#[default]"
+  # --- Per-tab cache: CLI label + context bar (session-specific) ---
+  parts="#[fg=colour203,bold]Claude#[default] #[fg=colour245]|#[default]"
+
+  if [ "$ctx_pct" -ge 80 ] 2>/dev/null; then
+    ctx_color="red"
+  elif [ "$ctx_pct" -ge 50 ] 2>/dev/null; then
+    ctx_color="yellow"
+  else
+    ctx_color="green"
+  fi
+  ctx_bar=$(make_bar "$ctx_pct" 10 "$ctx_color" "colour114")
+  parts="${parts} ${ctx_bar} #[fg=${ctx_color}]${ctx_pct}%#[default]"
 
   echo "$parts" > "$CACHE_FILE"
+
+  # --- Per-tab model suffix cache ---
+  echo " #[fg=colour245]|#[default] #[fg=cyan][${model}]#[default]" > "${CACHE_FILE%.tmux}-model.tmux"
 } &
