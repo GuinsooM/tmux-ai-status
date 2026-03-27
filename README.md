@@ -30,6 +30,13 @@ git clone https://github.com/GuinsooM/tmux-ai-status.git ~/.config/tmux/ai-statu
 bash ~/.config/tmux/ai-status/install.sh
 ```
 
+The installer auto-detects `~/.config/tmux/tmux.conf.local` and `~/.tmux.conf.local`.
+For custom locations, override them explicitly:
+
+```bash
+TMUX_LOCAL=/path/to/tmux.conf.local TMUX_CONFIG=/path/to/tmux.conf bash ~/.config/tmux/ai-status/install.sh
+```
+
 ## Uninstall
 
 ```bash

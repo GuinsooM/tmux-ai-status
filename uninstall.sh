@@ -5,7 +5,16 @@
 
 set -e
 
-TMUX_LOCAL="${HOME}/.config/tmux/tmux.conf.local"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./tmux-config-paths.sh
+. "$SCRIPT_DIR/tmux-config-paths.sh"
+
+TMUX_LOCAL="$(resolve_tmux_local || true)"
+if [ -z "$TMUX_LOCAL" ]; then
+  TMUX_LOCAL="$(resolve_tmux_local_from_backups || true)"
+fi
+TMUX_CONFIG="$(resolve_tmux_config "$TMUX_LOCAL" || true)"
+RELOAD_TARGET="${TMUX_CONFIG:-$TMUX_LOCAL}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -15,6 +24,7 @@ info()  { echo -e "${GREEN}[✓]${NC} $1"; }
 error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 # Find most recent backup
+[ -n "$TMUX_LOCAL" ] || error "Unable to determine tmux.conf.local path. Set TMUX_LOCAL=/path/to/tmux.conf.local if needed"
 backup=$(ls -t "${TMUX_LOCAL}.bak."* 2>/dev/null | head -1)
 [ -n "$backup" ] || error "No backup found. Manually remove ai-status references from $TMUX_LOCAL"
 
@@ -34,7 +44,7 @@ rm -f /tmp/claude-status-${USER}*.tmux /tmp/claude-cwd-${USER}*.txt /tmp/codex-s
 info "Cleaned up cache files"
 
 if [ -n "$TMUX" ]; then
-  tmux source-file ~/.config/tmux/tmux.conf 2>/dev/null && info "Reloaded tmux config"
+  tmux source-file "$RELOAD_TARGET" 2>/dev/null && info "Reloaded tmux config: $RELOAD_TARGET"
 fi
 
 info "Uninstall complete"

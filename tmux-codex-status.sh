@@ -47,6 +47,32 @@ make_bar() {
   echo "#[fg=${fg_color}]${bar}#[fg=${dim_color}]${empty_bar}#[default]"
 }
 
+center_text() {
+  local width="$1" text="$2"
+  local len=${#text}
+  if [ "$len" -ge "$width" ]; then
+    printf '%s' "$text"
+    return
+  fi
+
+  local total_pad=$(( width - len ))
+  local left_pad=$(( total_pad / 2 ))
+  local right_pad=$(( total_pad - left_pad ))
+  printf '%*s%s%*s' "$left_pad" "" "$text" "$right_pad" ""
+}
+
+format_effort_tag() {
+  local effort
+  effort=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$effort" in
+    low) printf '(L)' ;;
+    medium|med) printf '(M)' ;;
+    high) printf '(H)' ;;
+    xhigh|max|ultra|ultrathink) printf '(X)' ;;
+    *) printf '' ;;
+  esac
+}
+
 ACTIVE_ROLLOUT=$(find_active_rollout)
 
 # Prefer the rollout file that the active Codex process is currently writing.
@@ -67,6 +93,7 @@ def parse_rollout(path):
     latest_token = None
     latest_with_limits = None
     latest_cwd = ""
+    latest_effort = ""
     try:
         with path.open() as fh:
             for line in fh:
@@ -75,14 +102,20 @@ def parse_rollout(path):
                 except Exception:
                     continue
                 if obj.get("type") == "turn_context":
-                    latest_cwd = obj.get("payload", {}).get("cwd") or latest_cwd
+                    payload = obj.get("payload", {})
+                    latest_cwd = payload.get("cwd") or latest_cwd
+                    latest_effort = (
+                        payload.get("effort")
+                        or payload.get("collaboration_mode", {}).get("settings", {}).get("reasoning_effort")
+                        or latest_effort
+                    )
                 elif obj.get("type") == "event_msg" and obj.get("payload", {}).get("type") == "token_count":
                     latest_token = obj
                     if obj.get("payload", {}).get("rate_limits") is not None:
                         latest_with_limits = obj
     except Exception:
-        return None, None, ""
-    return latest_token, latest_with_limits, latest_cwd
+        return None, None, "", ""
+    return latest_token, latest_with_limits, latest_cwd, latest_effort
 
 files = []
 today = datetime.now()
@@ -93,23 +126,28 @@ for days_ago in range(7):
 files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
 selected_latest = None
+selected_effort = None
 global_latest = None
+global_effort = None
 global_latest_with_limits = None
 
 if active_rollout and active_rollout.is_file():
-    latest_token, latest_with_limits, _ = parse_rollout(active_rollout)
+    latest_token, latest_with_limits, _, latest_effort = parse_rollout(active_rollout)
     selected_latest = latest_token
+    selected_effort = latest_effort
     global_latest_with_limits = latest_with_limits
 
 for path in files:
-    latest_token, latest_with_limits, latest_cwd = parse_rollout(path)
+    latest_token, latest_with_limits, latest_cwd, latest_effort = parse_rollout(path)
 
     if latest_token and global_latest is None:
         global_latest = latest_token
+        global_effort = latest_effort
     if latest_with_limits and global_latest_with_limits is None:
         global_latest_with_limits = latest_with_limits
     if not selected_latest and pane_cwd and latest_token and latest_cwd == pane_cwd:
         selected_latest = latest_token
+        selected_effort = latest_effort
 
     if selected_latest and global_latest_with_limits:
         break
@@ -117,6 +155,7 @@ for path in files:
 result = {
     "latest": selected_latest or global_latest,
     "latest_with_limits": global_latest_with_limits or selected_latest or global_latest,
+    "effort": selected_effort or global_effort,
 }
 if result["latest"] is not None:
     print(json.dumps(result, separators=(",", ":")))
@@ -125,6 +164,7 @@ PY
 
 latest=$(echo "$selection_json" | jq -c '.latest // empty' 2>/dev/null)
 latest_with_limits=$(echo "$selection_json" | jq -c '.latest_with_limits // empty' 2>/dev/null)
+effort=$(echo "$selection_json" | jq -r '.effort // empty' 2>/dev/null)
 
 if [ -z "$latest" ]; then
   echo "#[fg=colour84,bold]Codex #[default]#[fg=colour245](no data)#[default]" > "$CACHE_FILE"
@@ -208,9 +248,16 @@ if [ -n "$u7_pct" ]; then
   if [ -n "$u7_resets" ]; then
     now=$(date +%s)
     if [ "$u7_resets" -gt "$now" ] 2>/dev/null; then
-      diff_hrs=$(( (u7_resets - now) / 3600 ))
-      days=$((diff_hrs / 24)); hours=$((diff_hrs % 24))
-      u7_reset=$(printf '(%dd%02dh)' "$days" "$hours")
+      diff_sec=$(( u7_resets - now ))
+      if [ "$diff_sec" -lt 86400 ]; then
+        diff_min=$(( diff_sec / 60 ))
+        hours=$((diff_min / 60)); mins=$((diff_min % 60))
+        u7_reset=$(printf '(%dh%02dm)' "$hours" "$mins")
+      else
+        diff_hrs=$(( diff_sec / 3600 ))
+        days=$((diff_hrs / 24)); hours=$((diff_hrs % 24))
+        u7_reset=$(printf '(%dd%02dh)' "$days" "$hours")
+      fi
       u7_reset=$(printf '%-8s' "$u7_reset")
     fi
   fi
@@ -221,7 +268,9 @@ fi
 # Model
 codex_model=$(grep '^model ' ~/.codex/config.toml 2>/dev/null | head -1 | sed 's/.*= *"\(.*\)"/\1/')
 [ -z "$codex_model" ] && codex_model="?"
-model_label=$(printf '%-12s' "$codex_model")
+effort_tag=$(format_effort_tag "$effort")
+[ -n "$effort_tag" ] && codex_model="${codex_model}${effort_tag}"
+model_label=$(center_text 12 "$codex_model")
 parts="${parts} #[fg=colour245]|#[default] #[fg=cyan][${model_label}]#[default]"
 
 echo "$parts" > "$CACHE_FILE"

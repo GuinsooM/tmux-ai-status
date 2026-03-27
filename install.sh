@@ -16,7 +16,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TMUX_LOCAL="${HOME}/.config/tmux/tmux.conf.local"
+# shellcheck source=./tmux-config-paths.sh
+. "$SCRIPT_DIR/tmux-config-paths.sh"
+
+TMUX_LOCAL="$(resolve_tmux_local || true)"
+TMUX_CONFIG="$(resolve_tmux_config "$TMUX_LOCAL" || true)"
+RELOAD_TARGET="${TMUX_CONFIG:-$TMUX_LOCAL}"
 CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
 
 # --- Colors ---
@@ -30,9 +35,17 @@ warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 # --- Check prerequisites ---
+[ -n "$TMUX_LOCAL" ] || error "tmux.conf.local not found. Checked: $(tmux_local_candidates | paste -sd ', ' -). Set TMUX_LOCAL=/path/to/tmux.conf.local if needed"
 [ -f "$TMUX_LOCAL" ] || error "oh-my-tmux config not found: $TMUX_LOCAL"
 command -v jq >/dev/null 2>&1 || error "jq is required but not installed"
 command -v git >/dev/null 2>&1 || error "git is required but not installed"
+
+info "Using tmux local config: $TMUX_LOCAL"
+if [ -n "$TMUX_CONFIG" ]; then
+  info "Using tmux main config: $TMUX_CONFIG"
+else
+  warn "tmux.conf not found, will reload local overrides directly: $TMUX_LOCAL"
+fi
 
 # --- Backup ---
 cp "$TMUX_LOCAL" "${TMUX_LOCAL}.bak.$(date +%Y%m%d%H%M%S)"
@@ -114,9 +127,9 @@ fi
 
 # --- Reload tmux ---
 if [ -n "$TMUX" ]; then
-  tmux source-file ~/.config/tmux/tmux.conf 2>/dev/null && info "Reloaded tmux config" || warn "Failed to reload tmux, do it manually: tmux source-file ~/.config/tmux/tmux.conf"
+  tmux source-file "$RELOAD_TARGET" 2>/dev/null && info "Reloaded tmux config: $RELOAD_TARGET" || warn "Failed to reload tmux, do it manually: tmux source-file $RELOAD_TARGET"
 else
-  warn "Not inside tmux, reload manually: tmux source-file ~/.config/tmux/tmux.conf"
+  warn "Not inside tmux, reload manually: tmux source-file $RELOAD_TARGET"
 fi
 
 echo ""

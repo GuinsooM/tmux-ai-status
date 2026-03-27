@@ -41,6 +41,20 @@ make_bar() {
   echo "#[fg=${fg_color}]${bar}#[fg=${dim_color}]${empty_bar}#[default]"
 }
 
+center_text() {
+  local width="$1" text="$2"
+  local len=${#text}
+  if [ "$len" -ge "$width" ]; then
+    printf '%s' "$text"
+    return
+  fi
+
+  local total_pad=$(( width - len ))
+  local left_pad=$(( total_pad / 2 ))
+  local right_pad=$(( total_pad - left_pad ))
+  printf '%*s%s%*s' "$left_pad" "" "$text" "$right_pad" ""
+}
+
 # --- Generate tmux cache (background) ---
 {
   cwd=$(echo "$input" | jq -r '.workspace.current_dir // empty')
@@ -127,9 +141,16 @@ make_bar() {
       now=$(date +%s)
       reset_epoch=$(date -d "$u7_reset_at" +%s 2>/dev/null)
       if [ -n "$reset_epoch" ] && [ "$reset_epoch" -gt "$now" ] 2>/dev/null; then
-        diff_hrs=$(( (reset_epoch - now) / 3600 ))
-        days=$((diff_hrs / 24)); hours=$((diff_hrs % 24))
-        u7_reset=$(printf '(%dd%02dh)' "$days" "$hours")
+        diff_sec=$(( reset_epoch - now ))
+        if [ "$diff_sec" -lt 86400 ]; then
+          diff_min=$(( diff_sec / 60 ))
+          hours=$((diff_min / 60)); mins=$((diff_min % 60))
+          u7_reset=$(printf '(%dh%02dm)' "$hours" "$mins")
+        else
+          diff_hrs=$(( diff_sec / 3600 ))
+          days=$((diff_hrs / 24)); hours=$((diff_hrs % 24))
+          u7_reset=$(printf '(%dd%02dh)' "$days" "$hours")
+        fi
         u7_reset=$(printf '%-8s' "$u7_reset")
       fi
     fi
@@ -155,6 +176,6 @@ make_bar() {
   echo "$parts" > "$CACHE_FILE"
 
   # --- Per-tab model suffix cache (fixed width) ---
-  model_label=$(printf '%-12s' "$model")
+  model_label=$(center_text 12 "$model")
   echo " #[fg=colour245]|#[default] #[fg=cyan][${model_label}]#[default]" > "${CACHE_FILE%.tmux}-model.tmux"
 } &
